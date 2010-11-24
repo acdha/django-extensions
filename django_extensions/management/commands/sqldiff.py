@@ -193,7 +193,7 @@ class SQLDiff(object):
 
         if reverse_type == "DecimalField":
             kwargs['max_digits'] = description[4]
-            kwargs['decimal_places'] = abs(description[5])
+            kwargs['decimal_places'] = description[5] and abs(description[5]) or description[5]
 
         if description[6]:
             kwargs['blank'] = True
@@ -440,7 +440,7 @@ class SqliteSQLDiff(SQLDiff):
                 attname = field.db_column or field.attname
                 if attname in table_indexes and table_indexes[attname]['unique']:
                     continue
-                if table_indexes[attname]['primary_key']:
+                if attname in table_indexes and table_indexes[attname]['primary_key']:
                     continue
                 self.add_difference('unique-missing-in-db', table_name, attname)
 

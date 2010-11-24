@@ -6,7 +6,7 @@ Make sure your DJANGO_SETTINGS_MODULE is set to your project or
 place this script in the same directory of the project and call
 the script like this:
 
-$ python modelviz.py [-h] [-a] [-d] [-g] [-i <model_names>] <app_label> ... <app_label> > <filename>.dot
+$ python modelviz.py [-h] [-a] [-d] [-g] [-n] [-L <language>] [-i <model_names>] <app_label> ... <app_label> > <filename>.dot
 $ dot <filename>.dot -Tpng -o <filename>.png
 
 options:
@@ -27,6 +27,9 @@ options:
 
     -n, --verbose_names
     use verbose_name for field and models.
+
+    -L, --language
+    specify language used for verrbose_name localization
 """
 __version__ = "0.9"
 __svnid__ = "$Id$"
@@ -53,6 +56,7 @@ except ImportError:
 else:
     setup_environ(settings)
 
+from django.utils.translation import activate as activate_language
 from django.utils.safestring import mark_safe
 from django.template import Template, Context
 from django.db import models
@@ -150,6 +154,9 @@ def generate_dot(app_labels, **kwargs):
     all_applications = kwargs.get('all_applications', False)
     use_subgraph = kwargs.get('group_models', False)
     verbose_names = kwargs.get('verbose_names', False)
+    language = kwargs.get('language', None)
+    if language is not None:
+        activate_language( language )
 
     dot = head_template
 
@@ -175,10 +182,17 @@ def generate_dot(app_labels, **kwargs):
 
         for appmodel in get_models(app):
             abstracts = [e.__name__ for e in appmodel.__bases__ if hasattr(e, '_meta') and e._meta.abstract]
-            abstract_fields = []
-            for e in appmodel.__bases__:
-                if hasattr(e, '_meta') and e._meta.abstract:
-                    abstract_fields.extend(e._meta.fields)
+            
+            # collect all attribs of abstract superclasses
+            def getBasesAbstractFields(c):
+                _abstract_fields = []
+                for e in c.__bases__:
+                    if hasattr(e, '_meta') and e._meta.abstract:
+                        _abstract_fields.extend(e._meta.fields)
+                        _abstract_fields.extend(getBasesAbstractFields(e))
+                return _abstract_fields
+            abstract_fields = getBasesAbstractFields(appmodel)
+            
             model = {
                 'app_name': appmodel.__module__.replace(".", "_"),
                 'name': appmodel.__name__,
@@ -249,8 +263,10 @@ def generate_dot(app_labels, **kwargs):
 
             if appmodel._meta.many_to_many:
                 for field in appmodel._meta.many_to_many:
-                    if isinstance(field, ManyToManyField) and getattr(field, 'creates_table', False):
-                        add_relation(field, '[arrowhead=normal arrowtail=normal]')
+                    if isinstance(field, ManyToManyField):
+                        if (getattr(field, 'creates_table', False) or  # django 1.1.
+                            (field.rel.through and field.rel.through._meta.auto_created)):  # django 1.2
+                            add_relation(field, '[arrowhead=normal arrowtail=normal]')
                     elif isinstance(field, GenericRelation):
                         add_relation(field, mark_safe('[style="dotted"] [arrowhead=normal arrowtail=normal]'))
             graph['models'].append(model)
@@ -279,8 +295,8 @@ def generate_dot(app_labels, **kwargs):
 
 def main():
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hadgi:",
-                    ["help", "all_applications", "disable_fields", "group_models", "include_models=", "verbose_names"])
+        opts, args = getopt.getopt(sys.argv[1:], "hadgi:L:",
+                    ["help", "all_applications", "disable_fields", "group_models", "include_models=", "verbose_names", "language="])
     except getopt.GetoptError, error:
         print __doc__
         sys.exit(error)
@@ -300,7 +316,8 @@ def main():
             kwargs['include_models'] = arg.split(',')
         if opt in ("-n", "--verbose-names"):
             kwargs['verbose_names'] = True
-
+        if opt in ("-L", "--language"):
+            kwargs['language'] = arg
 
     if not args and not kwargs.get('all_applications', False):
         print __doc__
