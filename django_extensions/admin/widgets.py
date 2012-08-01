@@ -1,13 +1,14 @@
-from django import forms
+from django import forms, VERSION
 from django.conf import settings
 from django.utils.safestring import mark_safe
 from django.utils.text import truncate_words
 from django.template.loader import render_to_string
 from django.contrib.admin.widgets import ForeignKeyRawIdWidget
 
+
 class ForeignKeySearchInput(ForeignKeyRawIdWidget):
     """
-    A Widget for displaying ForeignKeys in an autocomplete search input 
+    A Widget for displaying ForeignKeys in an autocomplete search input
     instead in a <select> box.
     """
     # Set in subclass to render the widget with a different template
@@ -38,7 +39,7 @@ class ForeignKeySearchInput(ForeignKeyRawIdWidget):
     def render(self, name, value, attrs=None):
         if attrs is None:
             attrs = {}
-        output = [super(ForeignKeySearchInput, self).render(name, value, attrs)]
+        #output = [super(ForeignKeySearchInput, self).render(name, value, attrs)]
         opts = self.rel.to._meta
         app_label = opts.app_label
         model_name = opts.object_name.lower()
@@ -48,7 +49,7 @@ class ForeignKeySearchInput(ForeignKeyRawIdWidget):
             url = '?' + '&amp;'.join(['%s=%s' % (k, v) for k, v in params.items()])
         else:
             url = ''
-        if not attrs.has_key('class'):
+        if not 'class' in attrs:
             attrs['class'] = 'vForeignKeyRawIdAdminField'
         # Call the TextInput render method directly to have more control
         output = [forms.TextInput.render(self, name, value, attrs)]
@@ -56,16 +57,23 @@ class ForeignKeySearchInput(ForeignKeyRawIdWidget):
             label = self.label_for_value(value)
         else:
             label = u''
+
+        try:
+            admin_media_prefix = settings.ADMIN_MEDIA_PREFIX
+        except AttributeError:
+            admin_media_prefix = settings.STATIC_URL + "admin/"
+
         context = {
             'url': url,
             'related_url': related_url,
-            'admin_media_prefix': settings.ADMIN_MEDIA_PREFIX,
+            'admin_media_prefix': admin_media_prefix,
             'search_path': self.search_path,
             'search_fields': ','.join(self.search_fields),
             'model_name': model_name,
             'app_label': app_label,
             'label': label,
             'name': name,
+            'pre_django_14': (VERSION[:2]<(1,4)),
         }
         output.append(render_to_string(self.widget_template or (
             'django_extensions/widgets/%s/%s/foreignkey_searchinput.html' % (app_label, model_name),

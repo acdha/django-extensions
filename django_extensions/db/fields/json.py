@@ -17,6 +17,7 @@ from django.conf import settings
 from django.utils import simplejson
 from django.utils.encoding import smart_unicode
 
+
 class JSONEncoder(simplejson.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -26,17 +27,19 @@ class JSONEncoder(simplejson.JSONEncoder):
             return obj.strftime('%Y-%m-%dT%H:%M:%SZ')
         return simplejson.JSONEncoder.default(self, obj)
 
+
 def dumps(value):
-    assert isinstance(value, dict)
     return JSONEncoder().encode(value)
+
 
 def loads(txt):
     value = simplejson.loads(
         txt,
-        parse_float = Decimal,
-        encoding    = settings.DEFAULT_CHARSET)
-    assert isinstance(value, dict)
+        parse_float=Decimal,
+        encoding=settings.DEFAULT_CHARSET
+    )
     return value
+
 
 class JSONDict(dict):
     """
@@ -45,6 +48,14 @@ class JSONDict(dict):
     """
     def __repr__(self):
         return dumps(self)
+
+class JSONList(list):
+    """
+    As above
+    """
+    def __repr__(self):
+        return dumps(self)
+
 
 class JSONField(models.TextField):
     """JSONField is a generic textfield that neatly serializes/unserializes
@@ -60,21 +71,25 @@ class JSONField(models.TextField):
 
     def to_python(self, value):
         """Convert our string value to JSON after we load it from the DB"""
-        if not value:
+        if value is None or value == '':
             return {}
         elif isinstance(value, basestring):
             res = loads(value)
-            assert isinstance(res, dict)
-            return JSONDict(**res)
+            if isinstance(res, dict):
+                return JSONDict(**res)
+            else:
+                return JSONList(res)
+
         else:
             return value
 
-    def get_db_prep_save(self, value):
+    def get_db_prep_save(self, value, connection):
         """Convert our JSON object to a string before we save"""
-        if not value:
-            return super(JSONField, self).get_db_prep_save("")
+        if not isinstance(value, (list, dict)):
+            return super(JSONField, self).get_db_prep_save("", connection=connection)
         else:
-            return super(JSONField, self).get_db_prep_save(dumps(value))
+            return super(JSONField, self).get_db_prep_save(dumps(value),
+                                                           connection=connection)
 
     def south_field_triple(self):
         "Returns a suitable description of this field for South."

@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.models import User
 import getpass
 
+
 class Command(BaseCommand):
     help = "Clone of the UNIX program ``passwd'', for django.contrib.auth."
 
@@ -34,4 +35,4 @@ class Command(BaseCommand):
         u.set_password(p1)
         u.save()
 
-        return "Password changed successfully for user", u.username
+        return "Password changed successfully for user %s\n" % u.username

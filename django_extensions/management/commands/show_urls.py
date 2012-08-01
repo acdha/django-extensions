@@ -1,29 +1,46 @@
 from django.conf import settings
 from django.core.exceptions import ViewDoesNotExist
+from django.core.urlresolvers import RegexURLPattern, RegexURLResolver
 from django.core.management.base import BaseCommand
+from django.utils.translation import ugettext as _
+from optparse import make_option
+
 try:
     # 2008-05-30 admindocs found in newforms-admin brand
     from django.contrib.admindocs.views import simplify_regex
 except ImportError:
     # fall back to trunk, pre-NFA merge
     from django.contrib.admin.views.doc import simplify_regex
-        
+import re
+
 from django_extensions.management.color import color_style
 
+
 def extract_views_from_urlpatterns(urlpatterns, base=''):
-    """ 
+    """
     Return a list of views from a list of urlpatterns.
 
     Each object in the returned list is a two-tuple: (view_func, regex)
     """
     views = []
     for p in urlpatterns:
-        if hasattr(p, '_get_callback'):
+        if isinstance(p, RegexURLPattern):
+            try:
+                views.append((p.callback, base + p.regex.pattern, p.name))
+            except ViewDoesNotExist:
+                continue
+        elif isinstance(p, RegexURLResolver):
+            try:
+                patterns = p.url_patterns
+            except ImportError:
+                continue
+            views.extend(extract_views_from_urlpatterns(patterns, base + p.regex.pattern))
+        elif hasattr(p, '_get_callback'):
             try:
                 views.append((p._get_callback(), base + p.regex.pattern, p.name))
             except ViewDoesNotExist:
                 continue
-        elif hasattr(p, '_get_url_patterns'):
+        elif hasattr(p, 'url_patterns') or hasattr(p, '_get_url_patterns'):
             try:
                 patterns = p.url_patterns
             except ImportError:
@@ -33,11 +50,17 @@ def extract_views_from_urlpatterns(urlpatterns, base=''):
             raise TypeError, _("%s does not appear to be a urlpattern object") % p
     return views
 
+
 class Command(BaseCommand):
+    options_list = BaseCommand.option_list + (
+        make_option("--unsorted", "-u", action="store_true", dest="unsorted",
+                    help="Show urls unsorted but same order as found in url patterns"),
+    )
+
     help = "Displays all of the url matching routes for the project."
-    
+
     requires_model_validation = True
-    
+
     def handle(self, *args, **options):
         if args:
             appname, = args
@@ -61,9 +84,16 @@ class Command(BaseCommand):
                 continue
             view_functions = extract_views_from_urlpatterns(urlconf.urlpatterns)
             for (func, regex, url_name) in view_functions:
-                func_name = hasattr(func, '__name__') and func.__name__ or repr(func)
+                if hasattr(func, '__name__'):
+                    func_name = func.__name__
+                elif hasattr(func, '__class__'):
+                    func_name = '%s()' % func.__class__.__name__
+                else:
+                    func_name = re.sub(r' at 0x[0-9a-f]+', '', repr(func))
                 views.append("%(url)s\t%(module)s.%(name)s\t%(url_name)s" % {'name': style.MODULE_NAME(func_name),
                                        'module': style.MODULE(func.__module__),
                                        'url_name': style.URL_NAME(url_name or ''),
                                        'url': style.URL(simplify_regex(regex))})
-        return "\n".join([v for v in views])
+        if not getattr(options, 'unsorted', False):
+            views = sorted(views)
+        return "\n".join([v for v in views]) + "\n"

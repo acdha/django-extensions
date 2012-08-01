@@ -7,6 +7,7 @@ from django.utils.translation import ugettext_lazy as _
 from django_extensions.db.fields import (ModificationDateTimeField,
                                          CreationDateTimeField, AutoSlugField)
 
+
 class TimeStampedModel(models.Model):
     """ TimeStampedModel
     An abstract base class model that provides self-managed "created" and
@@ -16,7 +17,10 @@ class TimeStampedModel(models.Model):
     modified = ModificationDateTimeField(_('modified'))
 
     class Meta:
+        get_latest_by = 'modified'
+        ordering = ('-modified', '-created',)
         abstract = True
+
 
 class TitleSlugDescriptionModel(models.Model):
     """ TitleSlugDescriptionModel
@@ -30,28 +34,31 @@ class TitleSlugDescriptionModel(models.Model):
     class Meta:
         abstract = True
 
+
 class ActivatorModelManager(models.Manager):
     """ ActivatorModelManager
     Manager to return instances of ActivatorModel: SomeModel.objects.active() / .inactive()
     """
     def active(self):
         """ Returns active instances of ActivatorModel: SomeModel.objects.active() """
-        return super(ActivatorModelManager, self).get_query_set().filter(status=1)
+        return self.get_query_set().filter(status=ActivatorModel.ACTIVE_STATUS)
 
     def inactive(self):
         """ Returns inactive instances of ActivatorModel: SomeModel.objects.inactive() """
-        return super(ActivatorModelManager, self).get_query_set().filter(status=0)
+        return self.get_query_set().filter(status=ActivatorModel.INACTIVE_STATUS)
+
 
 class ActivatorModel(models.Model):
     """ ActivatorModel
     An abstract base class model that provides activate and deactivate fields.
     """
+    INACTIVE_STATUS, ACTIVE_STATUS = range(2)
     STATUS_CHOICES = (
-        (0, _('Inactive')),
-        (1, _('Active')),
+        (INACTIVE_STATUS, _('Inactive')),
+        (ACTIVE_STATUS, _('Active')),
     )
     status = models.IntegerField(_('status'), choices=STATUS_CHOICES,
-        default=1)
+        default=ACTIVE_STATUS)
     activate_date = models.DateTimeField(blank=True, null=True,
         help_text=_('keep empty for an immediate activation'))
     deactivate_date = models.DateTimeField(blank=True, null=True,
@@ -59,6 +66,7 @@ class ActivatorModel(models.Model):
     objects = ActivatorModelManager()
 
     class Meta:
+        ordering = ('status', '-activate_date',)
         abstract = True
 
     def save(self, *args, **kwargs):

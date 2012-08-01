@@ -27,6 +27,10 @@ Command options are:
                         files.
   --filter-list         Override default directory and file exclusion
                         filters. (enter as comma seperated line)
+  --renamegzip          Enables renaming of gzipped files by appending '.gz.
+                        to the original file name. This way your original assets
+                        will not be replaced by the gzipped ones if you don't want
+                        them to be. 
 
 TODO:
  * Use fnmatch (or regex) to allow more complex FILTER_LIST rules.
@@ -50,8 +54,8 @@ try:
 except ImportError:
     raise ImportError, "The boto Python library is not installed."
 
-class Command(BaseCommand):
 
+class Command(BaseCommand):
     # Extra variables to avoid passing these around
     AWS_ACCESS_KEY_ID = ''
     AWS_SECRET_ACCESS_KEY = ''
@@ -61,7 +65,8 @@ class Command(BaseCommand):
     GZIP_CONTENT_TYPES = (
         'text/css',
         'application/javascript',
-        'application/x-javascript'
+        'application/x-javascript',
+        'text/javascript'
     )
 
     upload_count = 0
@@ -78,6 +83,9 @@ class Command(BaseCommand):
         optparse.make_option('--gzip',
             action='store_true', dest='gzip', default=False,
             help="Enables gzipping CSS and Javascript files."),
+        optparse.make_option('--renamegzip',
+            action='store_true', dest='renamegzip', default=False,
+            help="Enables renaming of gzipped assets to have '.gz' appended to the filename."),
         optparse.make_option('--expires',
             action='store_true', dest='expires', default=False,
             help="Enables setting a far future expires header."),
@@ -98,9 +106,9 @@ class Command(BaseCommand):
 
         # Check for AWS keys in settings
         if not hasattr(settings, 'AWS_ACCESS_KEY_ID') or \
-           not hasattr(settings, 'AWS_SECRET_ACCESS_KEY'):
-           raise CommandError('Missing AWS keys from settings file.  Please' +
-                     'supply both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.')
+            not hasattr(settings, 'AWS_SECRET_ACCESS_KEY'):
+            raise CommandError('Missing AWS keys from settings file.  Please' +
+                                'supply both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.')
         else:
             self.AWS_ACCESS_KEY_ID = settings.AWS_ACCESS_KEY_ID
             self.AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY
@@ -122,6 +130,7 @@ class Command(BaseCommand):
         self.verbosity = int(options.get('verbosity'))
         self.prefix = options.get('prefix')
         self.do_gzip = options.get('gzip')
+        self.rename_gzip = options.get('renamegzip')
         self.do_expires = options.get('expires')
         self.do_force = options.get('force')
         self.DIRECTORY = options.get('dir')
@@ -150,8 +159,12 @@ class Command(BaseCommand):
 
     def compress_string(self, s):
         """Gzip a given string."""
-        import cStringIO, gzip
-        zbuf = cStringIO.StringIO()
+        import gzip
+        try:
+            from cStringIO import StringIO
+        except ImportError:
+            from StringIO import StringIO
+        zbuf = StringIO()
         zfile = gzip.GzipFile(mode='wb', compresslevel=6, fileobj=zbuf)
         zfile.write(s)
         zfile.close()
@@ -172,13 +185,13 @@ class Command(BaseCommand):
         """
         This is the callback to os.path.walk and where much of the work happens
         """
-        bucket, key, bucket_name, root_dir = arg # expand arg tuple
+        bucket, key, bucket_name, root_dir = arg
 
         # Skip directories we don't want to sync
         if os.path.basename(dirname) in self.FILTER_LIST:
             # prevent walk from processing subfiles/subdirs below the ignored one
             del names[:]
-            return 
+            return
 
         # Later we assume the MEDIA_ROOT ends with a trailing slash
         if not root_dir.endswith(os.path.sep):
@@ -188,11 +201,11 @@ class Command(BaseCommand):
             headers = {}
 
             if file in self.FILTER_LIST:
-                continue # Skip files we don't want to sync
+                continue  # Skip files we don't want to sync
 
             filename = os.path.join(dirname, file)
             if os.path.isdir(filename):
-                continue # Don't try to upload directories
+                continue  # Don't try to upload directories
 
             file_key = filename[len(root_dir):]
             if self.prefix:
@@ -224,19 +237,22 @@ class Command(BaseCommand):
             file_size = os.fstat(file_obj.fileno()).st_size
             filedata = file_obj.read()
             if self.do_gzip:
-                # Gzipping only if file is large enough (>1K is recommended) 
+                # Gzipping only if file is large enough (>1K is recommended)
                 # and only if file is a common text type (not a binary file)
                 if file_size > 1024 and content_type in self.GZIP_CONTENT_TYPES:
                     filedata = self.compress_string(filedata)
+                    if self.rename_gzip: 
+                        #If rename_gzip is True, then rename the file by appending '.gz' to original filename
+                        file_key = '%s.gz' % (file_key)
                     headers['Content-Encoding'] = 'gzip'
                     if self.verbosity > 1:
                         print "\tgzipped: %dk to %dk" % \
-                            (file_size/1024, len(filedata)/1024)
+                            (file_size / 1024, len(filedata) / 1024)
             if self.do_expires:
                 # HTTP/1.0
                 headers['Expires'] = '%s GMT' % (email.Utils.formatdate(
                     time.mktime((datetime.datetime.now() +
-                    datetime.timedelta(days=365*2)).timetuple())))
+                    datetime.timedelta(days=365 * 2)).timetuple())))
                 # HTTP/1.1
                 headers['Cache-Control'] = 'max-age %d' % (3600 * 24 * 365 * 2)
                 if self.verbosity > 1:
@@ -247,7 +263,7 @@ class Command(BaseCommand):
                 key.name = file_key
                 key.set_contents_from_string(filedata, headers, replace=True)
                 key.set_acl('public-read')
-            except boto.s3.connection.S3CreateError, e:
+            except boto.exception.S3CreateError, e:
                 print "Failed: %s" % e
             except Exception, e:
                 print e
@@ -258,7 +274,7 @@ class Command(BaseCommand):
             file_obj.close()
 
 # Backwards compatibility for Django r9110
-if not [opt for opt in Command.option_list if opt.dest=='verbosity']:
+if not [opt for opt in Command.option_list if opt.dest == 'verbosity']:
     Command.option_list += (
         optparse.make_option('-v', '--verbosity',
             dest='verbosity', default=1, action='count',
