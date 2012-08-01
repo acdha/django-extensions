@@ -10,12 +10,34 @@ more information.
      extra = json.JSONField()
 """
 
-import datetime
+from datetime import tzinfo, timedelta, datetime
 from decimal import Decimal
-from django.db import models
+
 from django.conf import settings
+from django.db import models
 from django.utils import simplejson
-from django.utils.encoding import smart_unicode
+
+ZERO = timedelta(0)
+HOUR = timedelta(hours=1)
+
+
+class UTC(tzinfo):
+    """UTC time-zone
+
+    Implementation from http://docs.python.org/library/datetime.html
+    """
+
+    def utcoffset(self, dt):
+        return ZERO
+
+    def tzname(self, dt):
+        return "UTC"
+
+    def dst(self, dt):
+        return ZERO
+
+utc = UTC()
+
 
 
 class JSONEncoder(simplejson.JSONEncoder):
@@ -23,7 +45,10 @@ class JSONEncoder(simplejson.JSONEncoder):
         if isinstance(obj, Decimal):
             return str(obj)
         elif isinstance(obj, datetime.datetime):
-            assert settings.TIME_ZONE == 'UTC'
+            if obj.tzinfo is None:
+                assert settings.TIME_ZONE == 'UTC'
+            else:
+                obj = obj.astimezone(utc)
             return obj.strftime('%Y-%m-%dT%H:%M:%SZ')
         return simplejson.JSONEncoder.default(self, obj)
 
@@ -33,11 +58,9 @@ def dumps(value):
 
 
 def loads(txt):
-    value = simplejson.loads(
-        txt,
-        parse_float=Decimal,
-        encoding=settings.DEFAULT_CHARSET
-    )
+    value = simplejson.loads(txt,
+                             parse_float=Decimal,
+                             encoding=settings.DEFAULT_CHARSET)
     return value
 
 
